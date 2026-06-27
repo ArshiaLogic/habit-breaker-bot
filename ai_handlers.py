@@ -1,4 +1,5 @@
 import aiohttp
+import json
 import config
 
 
@@ -163,22 +164,42 @@ async def generate_image_with_gemini(prompt: str) -> dict:
         return {"error": f"خطای سیستمی در تولید عکس: {str(e)}"}
 
 
-async def generate_channel_post() -> str:
-    """Generates an engaging, standalone psychological/motivational post for the channel using Gemini."""
+
+async def generate_channel_post(has_image: bool = False) -> dict:
+    """
+    Generates an engaging channel post using Gemini.
+    If has_image is True, it also requests an English prompt for an image, generates the image using Gemini Image Model,
+    and returns a dict with 'text' and 'image_base64'.
+    Otherwise, returns a dict with just 'text'.
+    """
     key = get_next_gemini_key()
     if not key:
-        return "خطا: کلید API برای جمنای تنظیم نشده است."
+        return {"error": "خطا: کلید API برای جمنای تنظیم نشده است."}
 
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{config.GEMINI_TEXT_MODEL}:generateContent?key={key}"
     headers = {
         "Content-Type": "application/json"
     }
-    prompt = (
-        "شما یک روانشناس و مربی ترک عادت هستید. یک پست کوتاه، جذاب و بسیار تاثیرگذار "
-        "برای یک کانال تلگرامی بنویسید که به افراد در مسیر ترک عادات مخرب کمک می‌کند. "
-        "متن باید شامل یک نکته علمی یا روانشناسی ساده، همراه با راهکار عملی و لحن همدلانه باشد. "
-        "حتما از ایموجی‌های مناسب استفاده کنید. متن مستقیما آماده انتشار در کانال باشد."
-    )
+
+    if has_image:
+        prompt = (
+            "شما یک روانشناس و مربی ترک عادت هستید. یک پست کوتاه، جذاب و بسیار تاثیرگذار "
+            "برای یک کانال تلگرامی بنویسید که به افراد در مسیر ترک عادات مخرب کمک می‌کند. "
+            "سپس، یک دستور (Prompt) دقیق به زبان انگلیسی برای تولید یک تصویر مرتبط با این متن بنویسید که نشان‌دهنده آرامش، رهایی یا موفقیت باشد. "
+            "پاسخ خود را دقیقا و صرفا با فرمت JSON زیر برگردانید بدون هیچ متن اضافه‌ای:\n"
+            "{\n"
+            "  \"post_text\": \"متن پست فارسی همراه با ایموجی...\",\n"
+            "  \"image_prompt\": \"english prompt for image generation...\"\n"
+            "}"
+        )
+    else:
+        prompt = (
+            "شما یک روانشناس و مربی ترک عادت هستید. یک پست کوتاه، جذاب و بسیار تاثیرگذار "
+            "برای یک کانال تلگرامی بنویسید که به افراد در مسیر ترک عادات مخرب کمک می‌کند. "
+            "متن باید شامل یک نکته علمی یا روانشناسی ساده، همراه با راهکار عملی و لحن همدلانه باشد. "
+            "حتما از ایموجی‌های مناسب استفاده کنید. متن مستقیما آماده انتشار در کانال باشد."
+        )
+
     payload = {
         "contents": [{
             "parts": [{"text": prompt}]
@@ -191,10 +212,31 @@ async def generate_channel_post() -> str:
                 if response.status == 200:
                     data = await response.json()
                     try:
-                        return data["candidates"][0]["content"]["parts"][0]["text"]
+                        result_text = data["candidates"][0]["content"]["parts"][0]["text"]
+
+                        if has_image:
+                            # Parse JSON
+                            try:
+                                # Clean up markdown formatting if Gemini wrapped it in ```json
+                                result_text = result_text.replace("```json", "").replace("```", "").strip()
+                                parsed = json.loads(result_text)
+                                post_text = parsed.get("post_text", "خطا در استخراج متن.")
+                                img_prompt = parsed.get("image_prompt", "")
+
+                                img_data = await generate_image_with_gemini(img_prompt)
+                                if "error" in img_data:
+                                    return {"error": img_data["error"], "text": post_text}
+
+                                return {"text": post_text, "image_base64": img_data["image_base64"]}
+
+                            except json.JSONDecodeError:
+                                return {"error": "پاسخ جمنای فرمت JSON معتبری نداشت."}
+                        else:
+                            return {"text": result_text}
+
                     except (KeyError, IndexError):
-                        return "خطا در پردازش پاسخ جمنای برای پست کانال."
+                        return {"error": "خطا در پردازش پاسخ جمنای برای پست کانال."}
                 else:
-                    return f"خطا در ارتباط با سرور جمنای (پست کانال): {response.status}"
+                    return {"error": f"خطا در ارتباط با سرور جمنای (پست کانال): {response.status}"}
     except Exception as e:
-        return f"خطای سیستمی در ارتباط با جمنای (پست کانال): {str(e)}"
+        return {"error": f"خطای سیستمی در ارتباط با جمنای (پست کانال): {str(e)}"}

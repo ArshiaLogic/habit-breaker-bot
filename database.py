@@ -25,6 +25,14 @@ def init_db():
         cursor.execute('''
             INSERT OR IGNORE INTO settings (key, value) VALUES ('auto_post_count', '0')
         ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS auto_posts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                post_time TEXT,
+                has_image INTEGER
+            )
+        ''')
         conn.commit()
 
 def register_user(user_id: int):
@@ -125,3 +133,32 @@ def get_total_users() -> int:
         cursor.execute('SELECT COUNT(*) FROM users')
         result = cursor.fetchone()
         return result[0] if result else 0
+
+
+def add_auto_post(post_time: str, has_image: int):
+    """Adds a new scheduled auto post."""
+    with sqlite3.connect(DB_FILE) as conn:
+        cursor = conn.cursor()
+        cursor.execute('INSERT INTO auto_posts (post_time, has_image) VALUES (?, ?)', (post_time, has_image))
+        conn.commit()
+
+def get_all_auto_posts() -> list:
+    """Returns a list of all scheduled auto posts."""
+    with sqlite3.connect(DB_FILE) as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT id, post_time, has_image FROM auto_posts ORDER BY post_time ASC')
+        return cursor.fetchall()
+
+def delete_auto_post(post_id: int):
+    """Deletes an auto post schedule by ID."""
+    with sqlite3.connect(DB_FILE) as conn:
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM auto_posts WHERE id = ?', (post_id,))
+        conn.commit()
+
+def get_auto_posts_by_time(current_time: str) -> list:
+    """Returns all auto posts scheduled for a specific time (HH:MM)."""
+    with sqlite3.connect(DB_FILE) as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT id, has_image FROM auto_posts WHERE post_time = ?', (current_time,))
+        return cursor.fetchall()

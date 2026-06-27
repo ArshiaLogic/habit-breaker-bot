@@ -60,13 +60,23 @@ def get_admin_dashboard() -> InlineKeyboardMarkup:
     ])
 
 def get_admin_auto_post_settings_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔘 ۱ پست در روز", callback_data="set_auto_post_1")],
-        [InlineKeyboardButton(text="🔘 ۲ پست در روز", callback_data="set_auto_post_2")],
-        [InlineKeyboardButton(text="🔘 ۳ پست در روز", callback_data="set_auto_post_3")],
-        [InlineKeyboardButton(text="⏸ توقف تولید خودکار (۰)", callback_data="set_auto_post_0")],
-        [InlineKeyboardButton(text="🔙 بازگشت", callback_data="admin_back")]
-    ])
+    posts = database.get_all_auto_posts()
+    keyboard = []
+
+    for post in posts:
+        post_id = post[0]
+        time_str = post[1]
+        has_image = "🖼 تصویردار" if post[2] else "📝 فقط متن"
+
+        keyboard.append([
+            InlineKeyboardButton(text=f"ساعت {time_str} | {has_image}", callback_data="ignore"),
+            InlineKeyboardButton(text="🗑 حذف", callback_data=f"del_autopost_{post_id}")
+        ])
+
+    keyboard.append([InlineKeyboardButton(text="➕ افزودن محتوای جدید", callback_data="add_autopost")])
+    keyboard.append([InlineKeyboardButton(text="🔙 بازگشت", callback_data="admin_back")])
+
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 @dp.message(CommandStart())
 async def cmd_start(message: Message):
@@ -227,21 +237,61 @@ async def handle_admin_post_input(message: Message, state: FSMContext):
 async def handle_admin_auto_post_settings(callback: CallbackQuery):
     if callback.from_user.id != config.ADMIN_ID:
         return
-    current_setting = database.get_setting('auto_post_count')
     await callback.message.edit_text(
-        f"جمنای روزی چند تا پست روانشناسی/انگیزشی تو چنل تولید و منتشر کنه؟\n(وضعیت فعلی: {current_setting} پست در روز)",
+        "لیست محتواهای خودکارِ تنظیم شده برای انتشار در کانال:",
         reply_markup=get_admin_auto_post_settings_keyboard()
     )
 
-@dp.callback_query(F.data.startswith("set_auto_post_"))
-async def handle_set_auto_post(callback: CallbackQuery):
+@dp.callback_query(F.data.startswith("del_autopost_"))
+async def handle_delete_autopost(callback: CallbackQuery):
     if callback.from_user.id != config.ADMIN_ID:
         return
-    count = callback.data.split("_")[-1]
-    database.set_setting('auto_post_count', count)
+    post_id = int(callback.data.split("_")[-1])
+    database.delete_auto_post(post_id)
     await callback.message.edit_text(
-        f"✅ تنظیمات با موفقیت ذخیره شد.\nسیستم روزانه {count} پست تولید خواهد کرد.",
-        reply_markup=get_admin_dashboard()
+        "حذف شد. لیست به‌روزرسانی شده:",
+        reply_markup=get_admin_auto_post_settings_keyboard()
+    )
+
+@dp.callback_query(F.data == "add_autopost")
+async def handle_add_autopost(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != config.ADMIN_ID:
+        return
+    await state.set_state(AdminStates.waiting_for_post_time)
+    await callback.message.edit_text("لطفا ساعت انتشار را به فرمت HH:MM وارد کنید (مثال: 14:30) :\n(برای انصراف /cancel را بزنید)")
+
+@dp.message(StateFilter(AdminStates.waiting_for_post_time))
+async def handle_post_time_input(message: Message, state: FSMContext):
+    if message.text == "/cancel":
+        await state.clear()
+        await message.answer("عملیات لغو شد.", reply_markup=get_admin_dashboard())
+        return
+
+    # Basic validation for HH:MM
+    if len(message.text) == 5 and ":" in message.text:
+        await state.update_data(time=message.text)
+        await state.set_state(AdminStates.waiting_for_post_image_pref)
+
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="بله، همراه با تصویر ساخته شود", callback_data="pref_img_1")],
+            [InlineKeyboardButton(text="خیر، فقط متن باشد", callback_data="pref_img_0")]
+        ])
+        await message.answer("آیا این محتوا باید همراه با تصویر اختصاصی باشد؟", reply_markup=kb)
+    else:
+        await message.answer("فرمت زمان نامعتبر است. لطفا به فرمت HH:MM بفرستید (مثال: 08:00).")
+
+@dp.callback_query(StateFilter(AdminStates.waiting_for_post_image_pref), F.data.startswith("pref_img_"))
+async def handle_post_img_pref(callback: CallbackQuery, state: FSMContext):
+    has_image = int(callback.data.split("_")[-1])
+    data = await state.get_data()
+    post_time = data.get("time")
+
+    database.add_auto_post(post_time, has_image)
+    await state.clear()
+
+    await callback.message.edit_text(
+        f"محتوای جدید با موفقیت برای ساعت {post_time} ذخیره شد.\nلیست محتواها:",
+        reply_markup=get_admin_auto_post_settings_keyboard()
     )
 
 @dp.callback_query(F.data == "admin_stats")

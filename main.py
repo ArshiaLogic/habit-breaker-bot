@@ -1,4 +1,6 @@
 import asyncio
+import datetime
+from aiogram.types import BufferedInputFile
 import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import pytz
@@ -35,39 +37,49 @@ async def daily_motivation_task():
     logging.info(f"Daily motivation broadcasted to {len(user_ids)} users.")
 
 
+import base64
+
 async def channel_auto_post_task():
-    """Scheduled task to post to the channel if settings allow."""
-    logging.info("Running channel auto post check...")
-    count_str = database.get_setting('auto_post_count')
+    """Scheduled task that runs every minute to check and send dynamic auto posts."""
+    now_str = datetime.datetime.now(pytz.timezone("Asia/Tehran")).strftime("%H:%M")
+    posts_to_run = database.get_auto_posts_by_time(now_str)
 
-    if not count_str or count_str == '0':
-        logging.info("Auto post is disabled (0).")
+    if not posts_to_run:
         return
-
-    try:
-        count = int(count_str)
-    except ValueError:
-        return
-
-    # In a real scenario you might stagger these throughout the day.
-    # For now, we will post the configured number of times when this task runs.
-    # To prevent spamming, we can run them with a delay if count > 1
 
     if not config.CHANNEL_ID:
         logging.error("CHANNEL_ID is not configured for auto posts.")
         return
 
-    for i in range(count):
-        logging.info(f"Generating auto post {i+1}/{count}...")
-        post_text = await generate_channel_post()
-        if "خطا" not in post_text:
+    logging.info(f"Found {len(posts_to_run)} auto posts scheduled for {now_str}.")
+
+    for post in posts_to_run:
+        post_id, has_image = post
+        logging.info(f"Generating auto post (ID: {post_id}, Image: {has_image})...")
+
+        result = await generate_channel_post(has_image=bool(has_image))
+
+        if "error" in result:
+            logging.error(f"Failed to generate auto post {post_id}: {result['error']}")
+            # Fallback to text if error includes text
+            if "text" in result:
+                try:
+                    await bot.send_message(chat_id=config.CHANNEL_ID, text=result["text"])
+                    logging.info(f"Auto post {post_id} sent as text-only fallback.")
+                except Exception as e:
+                    logging.error(f"Failed to send text fallback to channel: {e}")
+        else:
             try:
-                await bot.send_message(chat_id=config.CHANNEL_ID, text=post_text)
-                logging.info(f"Auto post {i+1} successfully sent to channel.")
+                text = result["text"]
+                if "image_base64" in result:
+                    img_data = base64.b64decode(result["image_base64"])
+                    photo = BufferedInputFile(img_data, filename=f"post_{post_id}.jpg")
+                    await bot.send_photo(chat_id=config.CHANNEL_ID, photo=photo, caption=text)
+                else:
+                    await bot.send_message(chat_id=config.CHANNEL_ID, text=text)
+                logging.info(f"Auto post {post_id} successfully sent to channel.")
             except Exception as e:
                 logging.error(f"Failed to send auto post to channel: {e}")
-        else:
-            logging.error(f"Failed to generate auto post: {post_text}")
 
 async def main():
     database.init_db()
@@ -81,7 +93,7 @@ async def main():
     scheduler.add_job(daily_motivation_task, 'cron', hour=8, minute=0)
 
     # Run channel post task everyday at 12:00 PM (Noon)
-    scheduler.add_job(channel_auto_post_task, 'cron', hour=12, minute=0)
+    scheduler.add_job(channel_auto_post_task, 'cron', minute='*')
 
     scheduler.start()
 
