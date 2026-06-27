@@ -171,32 +171,6 @@ async def handle_relapse_confirm(callback: CallbackQuery):
     )
     await callback.answer("لغزش ثبت شد.", show_alert=False)
 
-@dp.message(StateFilter(None), F.text)
-async def handle_user_message(message: Message):
-    # Ignore admin commands or button presses here (already handled)
-    user_id = message.from_user.id
-
-    # Ensure user is registered before tracking messages
-    database.register_user(user_id)
-
-    # Check limit
-    current_count = database.get_message_count(user_id)
-    if current_count >= 5:
-        await message.answer("سهمیه ۵ پیام امروزت تموم شده، اما یادت نره مسیر پاکی ادامه داره!")
-        return
-
-    # User can send message
-    loading_msg = await message.answer("در حال فکر کردن...")
-
-    response_text = await ask_deepseek(message.text)
-
-    if "خطا" not in response_text:
-        database.increment_message_count(user_id)
-
-    await loading_msg.edit_text(response_text)
-
-
-
 # ============================
 # Admin Handlers
 # ============================
@@ -311,3 +285,28 @@ async def handle_admin_broadcast_input(message: Message, state: FSMContext):
 
     await loading_msg.edit_text(f"پیام همگانی با موفقیت به {sent_count} نفر ارسال شد. 🚀")
     await state.clear()
+
+
+@dp.message(StateFilter(None), F.text)
+async def handle_user_message(message: Message):
+    # Ignore admin commands or button presses here (already handled)
+    user_id = message.from_user.id
+
+    # Ensure user is registered before tracking messages
+    database.register_user(user_id)
+
+    # Check limit
+    current_count = database.get_message_count(user_id)
+    if current_count >= 5:
+        await message.answer("سهمیه ۵ پیام امروزت تموم شده، اما یادت نره مسیر پاکی ادامه داره!")
+        return
+
+    # User can send message
+    loading_msg = await message.answer("در حال فکر کردن...")
+
+    response_text = await ask_deepseek(message.text)
+
+    if "خطا" not in response_text:
+        database.increment_message_count(user_id)
+
+    await loading_msg.edit_text(response_text)
