@@ -2,7 +2,9 @@ import asyncio
 import datetime
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.filters import CommandStart, Command
+from aiogram.filters import CommandStart, Command, StateFilter
+from aiogram.fsm.context import FSMContext
+from states import AdminStates
 
 import config
 import database
@@ -46,6 +48,24 @@ def get_relapse_confirmation_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="❌ نه، اشتباه شد", callback_data="relapse_cancel"),
             InlineKeyboardButton(text="✅ بله، متاسفانه لغزش داشتم", callback_data="relapse_confirm")
         ]
+    ])
+
+
+def get_admin_dashboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📝 ویراستاری و ارسال دستی", callback_data="admin_manual_post")],
+        [InlineKeyboardButton(text="⚙️ تنظیمات محتوای خودکار", callback_data="admin_auto_post_settings")],
+        [InlineKeyboardButton(text="📊 آمار دیتابیس", callback_data="admin_stats")],
+        [InlineKeyboardButton(text="📢 ارسال پیام همگانی (Broadcast)", callback_data="admin_broadcast")]
+    ])
+
+def get_admin_auto_post_settings_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔘 ۱ پست در روز", callback_data="set_auto_post_1")],
+        [InlineKeyboardButton(text="🔘 ۲ پست در روز", callback_data="set_auto_post_2")],
+        [InlineKeyboardButton(text="🔘 ۳ پست در روز", callback_data="set_auto_post_3")],
+        [InlineKeyboardButton(text="⏸ توقف تولید خودکار (۰)", callback_data="set_auto_post_0")],
+        [InlineKeyboardButton(text="🔙 بازگشت", callback_data="admin_back")]
     ])
 
 @dp.message(CommandStart())
@@ -151,38 +171,7 @@ async def handle_relapse_confirm(callback: CallbackQuery):
     )
     await callback.answer("لغزش ثبت شد.", show_alert=False)
 
-@dp.message(Command("post"))
-async def handle_admin_post(message: Message):
-    if message.from_user.id != config.ADMIN_ID:
-        await message.answer("شما دسترسی لازم برای این دستور را ندارید.")
-        return
-
-    # Extract text after /post
-    text = message.text.replace("/post", "", 1).strip()
-
-    if not text:
-        await message.answer("لطفا متن مورد نظر خود را بعد از دستور /post وارد کنید.")
-        return
-
-    if not config.CHANNEL_ID:
-        await message.answer("شناسه کانال (CHANNEL_ID) در تنظیمات وارد نشده است.")
-        return
-
-    await message.answer("در حال ویراستاری متن با جمنای...")
-
-    edited_text = await edit_with_gemini(text)
-
-    if "خطا" in edited_text:
-        await message.answer(f"مشکلی پیش آمد:\n{edited_text}")
-        return
-
-    try:
-        await bot.send_message(chat_id=config.CHANNEL_ID, text=edited_text)
-        await message.answer("پیام با موفقیت ویراستاری و در کانال منتشر شد.")
-    except Exception as e:
-        await message.answer(f"خطا در ارسال پیام به کانال: {str(e)}")
-
-@dp.message(F.text)
+@dp.message(StateFilter(None), F.text)
 async def handle_user_message(message: Message):
     # Ignore admin commands or button presses here (already handled)
     user_id = message.from_user.id
@@ -205,3 +194,120 @@ async def handle_user_message(message: Message):
         database.increment_message_count(user_id)
 
     await loading_msg.edit_text(response_text)
+
+
+
+# ============================
+# Admin Handlers
+# ============================
+
+@dp.message(Command("admin"))
+async def cmd_admin(message: Message, state: FSMContext):
+    if message.from_user.id != config.ADMIN_ID:
+        await message.answer("شما دسترسی لازم برای این پنل را ندارید.")
+        return
+    await state.clear()
+    await message.answer("ورود به اتاق فرمان 🎛\nلطفا از منوی زیر انتخاب کنید:", reply_markup=get_admin_dashboard())
+
+@dp.callback_query(F.data == "admin_back")
+async def handle_admin_back(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != config.ADMIN_ID:
+        return
+    await state.clear()
+    await callback.message.edit_text("اتاق فرمان 🎛", reply_markup=get_admin_dashboard())
+
+@dp.callback_query(F.data == "admin_manual_post")
+async def handle_admin_manual_post(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != config.ADMIN_ID:
+        return
+    await state.set_state(AdminStates.waiting_for_post_text)
+    await callback.message.edit_text("متن خام یا ایده‌ات رو بفرست تا جمنای ویراستاریش کنه (برای انصراف /cancel را بزنید):")
+
+@dp.message(StateFilter(AdminStates.waiting_for_post_text))
+async def handle_admin_post_input(message: Message, state: FSMContext):
+    if message.text == "/cancel":
+        await state.clear()
+        await message.answer("عملیات لغو شد.", reply_markup=get_admin_dashboard())
+        return
+
+    if not config.CHANNEL_ID:
+        await message.answer("شناسه کانال تنظیم نشده است.")
+        await state.clear()
+        return
+
+    loading_msg = await message.answer("در حال ویراستاری متن با جمنای... 🧠")
+    edited_text = await edit_with_gemini(message.text)
+
+    if "خطا" in edited_text:
+        await loading_msg.edit_text(f"مشکلی پیش آمد:\n{edited_text}")
+    else:
+        try:
+            await bot.send_message(chat_id=config.CHANNEL_ID, text=edited_text)
+            await loading_msg.edit_text("پیام با موفقیت ویراستاری و در کانال منتشر شد. 🚀")
+        except Exception as e:
+            await loading_msg.edit_text(f"خطا در ارسال پیام به کانال: {str(e)}")
+
+    await state.clear()
+
+@dp.callback_query(F.data == "admin_auto_post_settings")
+async def handle_admin_auto_post_settings(callback: CallbackQuery):
+    if callback.from_user.id != config.ADMIN_ID:
+        return
+    current_setting = database.get_setting('auto_post_count')
+    await callback.message.edit_text(
+        f"جمنای روزی چند تا پست روانشناسی/انگیزشی تو چنل تولید و منتشر کنه؟\n(وضعیت فعلی: {current_setting} پست در روز)",
+        reply_markup=get_admin_auto_post_settings_keyboard()
+    )
+
+@dp.callback_query(F.data.startswith("set_auto_post_"))
+async def handle_set_auto_post(callback: CallbackQuery):
+    if callback.from_user.id != config.ADMIN_ID:
+        return
+    count = callback.data.split("_")[-1]
+    database.set_setting('auto_post_count', count)
+    await callback.message.edit_text(
+        f"✅ تنظیمات با موفقیت ذخیره شد.\nسیستم روزانه {count} پست تولید خواهد کرد.",
+        reply_markup=get_admin_dashboard()
+    )
+
+@dp.callback_query(F.data == "admin_stats")
+async def handle_admin_stats(callback: CallbackQuery):
+    if callback.from_user.id != config.ADMIN_ID:
+        return
+    total_users = database.get_total_users()
+    await callback.message.answer(f"تعداد کل قهرمان‌های عضو ربات: {total_users} نفر 🏆")
+    await callback.answer()
+
+@dp.callback_query(F.data == "admin_broadcast")
+async def handle_admin_broadcast(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != config.ADMIN_ID:
+        return
+    await state.set_state(AdminStates.waiting_for_broadcast)
+    await callback.message.edit_text("پیامی که می‌خوای به پیوی تمام کاربرا ارسال بشه رو بفرست (متن یا عکس):\n(برای انصراف /cancel را بزنید)")
+
+@dp.message(StateFilter(AdminStates.waiting_for_broadcast))
+async def handle_admin_broadcast_input(message: Message, state: FSMContext):
+    if message.text == "/cancel":
+        await state.clear()
+        await message.answer("عملیات لغو شد.", reply_markup=get_admin_dashboard())
+        return
+
+    users = database.get_all_user_ids()
+    if not users:
+        await message.answer("هیچ کاربری در دیتابیس یافت نشد.")
+        await state.clear()
+        return
+
+    sent_count = 0
+    loading_msg = await message.answer(f"در حال ارسال پیام به {len(users)} کاربر... ⏳")
+
+    for user_id in users:
+        try:
+            await message.copy_to(chat_id=user_id)
+            sent_count += 1
+            await asyncio.sleep(0.05) # Prevent hitting rate limits
+        except Exception:
+            pass # Ignore if user blocked the bot
+
+    await loading_msg.edit_text(f"پیام همگانی با موفقیت به {sent_count} نفر ارسال شد. 🚀")
+    await state.clear()

@@ -3,8 +3,9 @@ import datetime
 
 DB_FILE = "bot_database.db"
 
+
 def init_db():
-    """Initializes the database and creates the users table if it doesn't exist."""
+    """Initializes the database and creates the tables if they don't exist."""
     with sqlite3.connect(DB_FILE) as conn:
         cursor = conn.cursor()
         cursor.execute('''
@@ -13,6 +14,16 @@ def init_db():
                 start_date TEXT,
                 message_count INTEGER DEFAULT 0
             )
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        ''')
+        # Insert default setting if not exists
+        cursor.execute('''
+            INSERT OR IGNORE INTO settings (key, value) VALUES ('auto_post_count', '0')
         ''')
         conn.commit()
 
@@ -90,3 +101,27 @@ def get_all_user_ids():
         ''')
         results = cursor.fetchall()
         return [row[0] for row in results]
+
+
+def get_setting(key: str) -> str:
+    """Returns the value of a setting from the database, or None if not found."""
+    with sqlite3.connect(DB_FILE) as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT value FROM settings WHERE key = ?', (key,))
+        result = cursor.fetchone()
+        return result[0] if result else None
+
+def set_setting(key: str, value: str):
+    """Sets a key-value setting in the database."""
+    with sqlite3.connect(DB_FILE) as conn:
+        cursor = conn.cursor()
+        cursor.execute('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', (key, value))
+        conn.commit()
+
+def get_total_users() -> int:
+    """Returns the total number of registered users."""
+    with sqlite3.connect(DB_FILE) as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT COUNT(*) FROM users')
+        result = cursor.fetchone()
+        return result[0] if result else 0

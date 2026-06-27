@@ -161,3 +161,40 @@ async def generate_image_with_gemini(prompt: str) -> dict:
                     return {"error": f"خطا در ارتباط با سرور جمنای (تصویر): {response.status}"}
     except Exception as e:
         return {"error": f"خطای سیستمی در تولید عکس: {str(e)}"}
+
+
+async def generate_channel_post() -> str:
+    """Generates an engaging, standalone psychological/motivational post for the channel using Gemini."""
+    key = get_next_gemini_key()
+    if not key:
+        return "خطا: کلید API برای جمنای تنظیم نشده است."
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{config.GEMINI_TEXT_MODEL}:generateContent?key={key}"
+    headers = {
+        "Content-Type": "application/json"
+    }
+    prompt = (
+        "شما یک روانشناس و مربی ترک عادت هستید. یک پست کوتاه، جذاب و بسیار تاثیرگذار "
+        "برای یک کانال تلگرامی بنویسید که به افراد در مسیر ترک عادات مخرب کمک می‌کند. "
+        "متن باید شامل یک نکته علمی یا روانشناسی ساده، همراه با راهکار عملی و لحن همدلانه باشد. "
+        "حتما از ایموجی‌های مناسب استفاده کنید. متن مستقیما آماده انتشار در کانال باشد."
+    )
+    payload = {
+        "contents": [{
+            "parts": [{"text": prompt}]
+        }]
+    }
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers, json=payload, timeout=20) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    try:
+                        return data["candidates"][0]["content"]["parts"][0]["text"]
+                    except (KeyError, IndexError):
+                        return "خطا در پردازش پاسخ جمنای برای پست کانال."
+                else:
+                    return f"خطا در ارتباط با سرور جمنای (پست کانال): {response.status}"
+    except Exception as e:
+        return f"خطای سیستمی در ارتباط با جمنای (پست کانال): {str(e)}"
