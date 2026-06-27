@@ -265,3 +265,79 @@ async def generate_daily_motivation() -> str:
             advance_openrouter_key()
 
     return "خطا در ایجاد پیام روزانه پس از امتحان کردن تمام کلیدها."
+
+
+async def test_openrouter_keys() -> str:
+    """Tests all OpenRouter keys and returns a detailed status report."""
+    if not config.OPENROUTER_KEYS:
+        return "هیچ کلیدی برای OpenRouter تنظیم نشده است."
+
+    url = "https://openrouter.ai/api/v1/chat/completions"
+    payload = {
+        "model": config.OPENROUTER_TEXT_MODEL,
+        "messages": [{"role": "user", "content": "ping"}],
+        "max_tokens": 5
+    }
+
+    report = "📊 گزارش تست کلیدهای OpenRouter:\n\n"
+
+    async with aiohttp.ClientSession() as session:
+        for i, key in enumerate(config.OPENROUTER_KEYS):
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {key}"
+            }
+            try:
+                async with session.post(url, headers=headers, json=payload, timeout=10) as response:
+                    status = response.status
+                    if status == 200:
+                        report += f"✅ کلید {i+1}: سالم (200 OK)\n"
+                    else:
+                        try:
+                            data = await response.json()
+                            err_detail = data.get("error", {}).get("message", "بدون جزئیات")
+                        except:
+                            err_detail = await response.text()
+                            err_detail = err_detail[:50] + "..." if len(err_detail) > 50 else err_detail
+
+                        report += f"❌ کلید {i+1}: خطا ({status})\n   دلیل: {err_detail}\n"
+            except Exception as e:
+                report += f"🔴 کلید {i+1}: خطای اتصال ({str(e)})\n"
+
+    return report
+
+
+async def test_gemini_keys() -> str:
+    """Tests all Gemini keys and returns a detailed status report."""
+    if not config.GEMINI_KEYS:
+        return "هیچ کلیدی برای Gemini تنظیم نشده است."
+
+    url_base = f"https://generativelanguage.googleapis.com/v1beta/models/{config.GEMINI_TEXT_MODEL}:generateContent?key="
+    headers = {"Content-Type": "application/json"}
+    payload = {
+        "contents": [{"parts": [{"text": "ping"}]}]
+    }
+
+    report = "📊 گزارش تست کلیدهای Gemini:\n\n"
+
+    async with aiohttp.ClientSession() as session:
+        for i, key in enumerate(config.GEMINI_KEYS):
+            url = url_base + key
+            try:
+                async with session.post(url, headers=headers, json=payload, timeout=10) as response:
+                    status = response.status
+                    if status == 200:
+                        report += f"✅ کلید {i+1}: سالم (200 OK)\n"
+                    else:
+                        try:
+                            data = await response.json()
+                            err_detail = data.get("error", {}).get("message", "بدون جزئیات")
+                        except:
+                            err_detail = await response.text()
+                            err_detail = err_detail[:50] + "..." if len(err_detail) > 50 else err_detail
+
+                        report += f"❌ کلید {i+1}: خطا ({status})\n   دلیل: {err_detail}\n"
+            except Exception as e:
+                report += f"🔴 کلید {i+1}: خطای اتصال ({str(e)})\n"
+
+    return report

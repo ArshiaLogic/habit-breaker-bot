@@ -8,7 +8,7 @@ from states import AdminStates
 
 import config
 import database
-from ai_handlers import ask_openrouter, edit_with_gemini
+from ai_handlers import ask_openrouter, edit_with_gemini, test_openrouter_keys, test_gemini_keys
 
 # Initialize bot and dispatcher
 bot = Bot(token=config.BOT_TOKEN)
@@ -55,8 +55,9 @@ def get_admin_dashboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📝 ویراستاری و ارسال دستی", callback_data="admin_manual_post")],
         [InlineKeyboardButton(text="⚙️ تنظیمات محتوای خودکار", callback_data="admin_auto_post_settings")],
-        [InlineKeyboardButton(text="📊 آمار دیتابیس", callback_data="admin_stats")],
-        [InlineKeyboardButton(text="📢 ارسال پیام همگانی (Broadcast)", callback_data="admin_broadcast")],
+        [InlineKeyboardButton(text="📊 آمار دیتابیس", callback_data="admin_stats"), InlineKeyboardButton(text="📢 ارسال همگانی", callback_data="admin_broadcast")],
+        [InlineKeyboardButton(text="🧪 تست کلیدهای چت (OpenRouter)", callback_data="admin_test_or")],
+        [InlineKeyboardButton(text="🧪 تست کلیدهای محتوا (Gemini)", callback_data="admin_test_gem")],
         [InlineKeyboardButton(text="📋 لاگ خطاها", callback_data="admin_logs_0")]
     ])
 
@@ -338,6 +339,23 @@ async def handle_admin_broadcast_input(message: Message, state: FSMContext):
     await state.clear()
 
 
+
+
+@dp.callback_query(F.data == "admin_test_or")
+async def handle_admin_test_or(callback: CallbackQuery):
+    if callback.from_user.id != config.ADMIN_ID:
+        return
+    await callback.message.edit_text("در حال تست کلیدهای OpenRouter... ⏳ لطفاً چند ثانیه صبر کنید.", reply_markup=None)
+    report = await test_openrouter_keys()
+    await callback.message.edit_text(report, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 بازگشت", callback_data="admin_back")]]))
+
+@dp.callback_query(F.data == "admin_test_gem")
+async def handle_admin_test_gem(callback: CallbackQuery):
+    if callback.from_user.id != config.ADMIN_ID:
+        return
+    await callback.message.edit_text("در حال تست کلیدهای Gemini... ⏳ لطفاً چند ثانیه صبر کنید.", reply_markup=None)
+    report = await test_gemini_keys()
+    await callback.message.edit_text(report, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 بازگشت", callback_data="admin_back")]]))
 
 @dp.callback_query(F.data.startswith("admin_logs_"))
 async def handle_admin_logs(callback: CallbackQuery):
