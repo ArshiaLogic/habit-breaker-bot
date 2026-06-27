@@ -1,6 +1,7 @@
 import aiohttp
 import config
 
+
 # Global variables for Round-Robin state
 _deepseek_index = 0
 _gemini_index = 0
@@ -50,7 +51,7 @@ async def ask_deepseek(user_message: str) -> str:
         "Authorization": f"Bearer {key}"
     }
     payload = {
-        "model": "deepseek-chat",
+        "model": config.DEEPSEEK_TEXT_MODEL,
         "messages": [
             {"role": "system", "content": DEEPSEEK_SYSTEM_PROMPT},
             {"role": "user", "content": user_message}
@@ -80,7 +81,7 @@ async def generate_daily_motivation() -> str:
         "Authorization": f"Bearer {key}"
     }
     payload = {
-        "model": "deepseek-chat",
+        "model": config.DEEPSEEK_TEXT_MODEL,
         "messages": [
             {"role": "system", "content": DEEPSEEK_SYSTEM_PROMPT},
             {"role": "user", "content": "لطفا یک پیام انگیزشی و روانشناختی کوتاه (حدود ۲-۳ پاراگراف) برای ادامه مسیر ترک عادت بنویس."}
@@ -105,7 +106,7 @@ async def edit_with_gemini(text: str) -> str:
         return "متاسفانه کلید API برای جمنای تنظیم نشده است."
 
     # Using Gemini's REST API endpoint
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={key}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{config.GEMINI_TEXT_MODEL}:generateContent?key={key}"
     headers = {
         "Content-Type": "application/json"
     }
@@ -128,3 +129,35 @@ async def edit_with_gemini(text: str) -> str:
                     return f"خطا در ارتباط با سرور جمنای: {response.status}"
     except Exception as e:
         return f"خطای سیستمی در ارتباط با جمنای: {str(e)}"
+
+
+async def generate_image_with_gemini(prompt: str) -> dict:
+    """Sends a prompt to Gemini API to generate an image and returns a dict with base64 data or error."""
+    key = get_next_gemini_key()
+    if not key:
+        return {"error": "متاسفانه کلید API برای جمنای تنظیم نشده است."}
+
+    # Endpoint for Imagen models in AI Studio
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{config.GEMINI_IMAGE_MODEL}:predict?key={key}"
+    headers = {
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "instances": [{"prompt": prompt}],
+        "parameters": {"sampleCount": 1}
+    }
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers, json=payload, timeout=30) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    try:
+                        b64_img = data["predictions"][0]["bytesBase64Encoded"]
+                        return {"image_base64": b64_img}
+                    except (KeyError, IndexError):
+                        return {"error": "خطا در پردازش تصویر دریافتی از جمنای."}
+                else:
+                    return {"error": f"خطا در ارتباط با سرور جمنای (تصویر): {response.status}"}
+    except Exception as e:
+        return {"error": f"خطای سیستمی در تولید عکس: {str(e)}"}

@@ -20,3 +20,9 @@ GEMINI_KEYS = [
 ]
 # Filter out empty keys if any
 GEMINI_KEYS = [k for k in GEMINI_KEYS if k]
+
+
+# Models Configuration
+DEEPSEEK_TEXT_MODEL = os.getenv("DEEPSEEK_TEXT_MODEL", "deepseek-chat")
+GEMINI_TEXT_MODEL = os.getenv("GEMINI_TEXT_MODEL", "gemini-1.5-flash")
+GEMINI_IMAGE_MODEL = os.getenv("GEMINI_IMAGE_MODEL", "imagen-3.0-generate-001")
