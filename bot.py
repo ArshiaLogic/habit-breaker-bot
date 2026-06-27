@@ -1,7 +1,7 @@
 import asyncio
 import datetime
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import CommandStart, Command
 
 import config
@@ -12,43 +12,76 @@ from ai_handlers import ask_deepseek, edit_with_gemini
 bot = Bot(token=config.BOT_TOKEN)
 dp = Dispatcher()
 
-# Reply Keyboard
-main_keyboard = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="شروع / گزارش لغزش"), KeyboardButton(text="وضعیت من")]
-    ],
-    resize_keyboard=True,
-    persistent=True
-)
+def get_main_dashboard(user_id: int) -> InlineKeyboardMarkup:
+    """Builds the dynamic inline keyboard dashboard."""
+    start_date = database.get_start_date(user_id)
+
+    keyboard = []
+
+    # ردیف اول: فقط اگر شروع نکرده باشد
+    if not start_date:
+        keyboard.append([InlineKeyboardButton(text="🎯 شروع مسیر پاکی", callback_data="start_journey")])
+
+    # ردیف دوم: گزارش‌گیری و تعامل
+    keyboard.append([
+        InlineKeyboardButton(text="📊 وضعیت من (روزشمار)", callback_data="my_status"),
+        InlineKeyboardButton(text="🧠 مشاوره با هوش مصنوعی", callback_data="ai_consult")
+    ])
+
+    # ردیف سوم: اورژانس
+    keyboard.append([InlineKeyboardButton(text="🆘 وسوسه شدم! (کمک فوری)", callback_data="emergency_help")])
+
+    # ردیف چهارم: تنظیمات/لغزش و کانال
+    keyboard.append([
+        InlineKeyboardButton(text="⚠️ گزارش لغزش", callback_data="relapse_prompt"),
+        InlineKeyboardButton(text="📢 کانال پشتیبانی", url=config.SUPPORT_CHANNEL_URL)
+    ])
+
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+def get_relapse_confirmation_keyboard() -> InlineKeyboardMarkup:
+    """Builds the 2-layer relapse confirmation keyboard."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="❌ نه، اشتباه شد", callback_data="relapse_cancel"),
+            InlineKeyboardButton(text="✅ بله، متاسفانه لغزش داشتم", callback_data="relapse_confirm")
+        ]
+    ])
 
 @dp.message(CommandStart())
 async def cmd_start(message: Message):
-    database.register_user(message.from_user.id)
+    user_id = message.from_user.id
+    database.register_user(user_id)
+
     welcome_text = (
         "سلام! به ربات پشتیبان مسیر ترک عادت خوش آمدید.\n"
         "من اینجا هستم تا در این مسیر همراه و حامی شما باشم.\n"
-        "لطفا از دکمه‌های زیر برای ثبت وضعیت خود استفاده کنید."
+        "لطفا از منوی زیر برای مدیریت وضعیت خود استفاده کنید."
     )
-    await message.answer(welcome_text, reply_markup=main_keyboard)
 
-@dp.message(F.text == "شروع / گزارش لغزش")
-async def handle_start_relapse(message: Message):
-    user_id = message.from_user.id
-    database.register_user(user_id)
+    # Remove any old reply keyboards by sending a message and deleting it quickly (optional cleanup),
+    # Or just rely on the user tapping the new inline buttons.
+
+    await message.answer(welcome_text, reply_markup=get_main_dashboard(user_id))
+
+@dp.callback_query(F.data == "start_journey")
+async def handle_start_journey(callback: CallbackQuery):
+    user_id = callback.from_user.id
     database.update_start_date(user_id)
-    await message.answer(
-        "تاریخ شروع مسیر شما با موفقیت به زمان حال بروزرسانی شد. "
-        "هرگز ناامید نشوید، شروع دوباره نشانه قدرت شماست!",
-        reply_markup=main_keyboard
-    )
 
-@dp.message(F.text == "وضعیت من")
-async def handle_status(message: Message):
-    user_id = message.from_user.id
+    await callback.message.edit_text(
+        "مسیرت با موفقیت شروع شد! بهت افتخار می‌کنم. از الان روزشمارِ تو فعاله.",
+        reply_markup=get_main_dashboard(user_id)
+    )
+    await callback.answer("مسیر شروع شد!", show_alert=False)
+
+@dp.callback_query(F.data == "my_status")
+async def handle_my_status(callback: CallbackQuery):
+    user_id = callback.from_user.id
     start_date = database.get_start_date(user_id)
 
     if not start_date:
-        await message.answer("شما هنوز مسیری را شروع نکرده‌اید. لطفا دکمه «شروع / گزارش لغزش» را بزنید.")
+        await callback.answer("هنوز مسیرت رو شروع نکردی!", show_alert=True)
         return
 
     now = datetime.datetime.now()
@@ -56,8 +89,67 @@ async def handle_status(message: Message):
     days = diff.days
     hours = diff.seconds // 3600
 
-    status_text = f"شما تاکنون {days} روز و {hours} ساعت در مسیر موفقیت بوده‌اید! به همین روند ادامه دهید."
-    await message.answer(status_text)
+    status_text = f"قهرمان، تو الان {days} روز و {hours} ساعته که تو مسیر پاکی هستی! 🏆"
+
+    await callback.message.answer(status_text)
+    await callback.answer()
+
+@dp.callback_query(F.data == "ai_consult")
+async def handle_ai_consult(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    current_count = database.get_message_count(user_id)
+    remaining = max(0, 5 - current_count)
+
+    if remaining > 0:
+        msg = f"من اینجام تا حرفاتو بشنوم. می‌تونی مستقیماً همینجا پیام متنی بدی. (سهمیه امروزِ شما: {remaining} از ۵ پیام باقی‌مانده)."
+    else:
+        msg = "سهمیه ۵ پیام امروزت تموم شده، اما یادت نره مسیر پاکی ادامه داره!"
+
+    await callback.message.answer(msg)
+    await callback.answer()
+
+@dp.callback_query(F.data == "emergency_help")
+async def handle_emergency_help(callback: CallbackQuery):
+    emergency_text = (
+        "نفس عمیق بکش... 🌬\n\n"
+        "این وسوسه فقط یک موج گذراست، نه واقعیتِ تو.\n"
+        "بیا تمرین ۵-۴-۳-۲-۱ رو با هم انجام بدیم:\n"
+        "۵ چیز که الان می‌تونی ببینی رو پیدا کن.\n"
+        "۴ چیز که می‌تونی لمس کنی رو حس کن.\n"
+        "۳ چیز که می‌تونی بشنوی رو پیدا کن.\n"
+        "۲ چیز که می‌تونی بوش رو حس کنی.\n"
+        "۱ احساس خوبی که الان در بدنت هست.\n\n"
+        "تو قوی‌تر از این لحظه‌ای! بلند شو، جات رو عوض کن و یه لیوان آب خنک بخور. 💧"
+    )
+    await callback.message.answer(emergency_text)
+    await callback.answer("کمک فوری ارسال شد!", show_alert=False)
+
+@dp.callback_query(F.data == "relapse_prompt")
+async def handle_relapse_prompt(callback: CallbackQuery):
+    await callback.message.edit_text(
+        "مطمئنی می‌خوای لغزش رو ثبت کنی و روزشمار از صفر شروع بشه؟",
+        reply_markup=get_relapse_confirmation_keyboard()
+    )
+
+@dp.callback_query(F.data == "relapse_cancel")
+async def handle_relapse_cancel(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    await callback.message.edit_text(
+        "خوبه که اشتباه شد! به مسیرت ادامه بده.",
+        reply_markup=get_main_dashboard(user_id)
+    )
+
+@dp.callback_query(F.data == "relapse_confirm")
+async def handle_relapse_confirm(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    # Reset date to now
+    database.update_start_date(user_id)
+
+    await callback.message.edit_text(
+        "شکست پایان راه نیست، پیش‌نیازِ پیروزیه. دوباره با هم می‌سازیمش.",
+        reply_markup=get_main_dashboard(user_id)
+    )
+    await callback.answer("لغزش ثبت شد.", show_alert=False)
 
 @dp.message(Command("post"))
 async def handle_admin_post(message: Message):
@@ -101,7 +193,7 @@ async def handle_user_message(message: Message):
     # Check limit
     current_count = database.get_message_count(user_id)
     if current_count >= 5:
-        await message.answer("سهمیه ۵ پیام شما برای امروز به پایان رسیده است. لطفا فردا مجددا تلاش کنید.")
+        await message.answer("سهمیه ۵ پیام امروزت تموم شده، اما یادت نره مسیر پاکی ادامه داره!")
         return
 
     # User can send message
