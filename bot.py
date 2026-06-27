@@ -8,7 +8,7 @@ from states import AdminStates
 
 import config
 import database
-from ai_handlers import ask_deepseek, edit_with_gemini
+from ai_handlers import ask_openrouter, edit_with_gemini
 
 # Initialize bot and dispatcher
 bot = Bot(token=config.BOT_TOKEN)
@@ -304,7 +304,7 @@ async def handle_user_message(message: Message):
     # User can send message
     loading_msg = await message.answer("در حال فکر کردن...")
 
-    response_text = await ask_deepseek(message.text)
+    response_text = await ask_openrouter(message.text)
 
     if "خطا" not in response_text:
         database.increment_message_count(user_id)

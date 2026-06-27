@@ -3,16 +3,16 @@ import config
 
 
 # Global variables for Round-Robin state
-_deepseek_index = 0
+_openrouter_index = 0
 _gemini_index = 0
 
-def get_next_deepseek_key() -> str:
-    """Returns the next DeepSeek API key in a round-robin fashion."""
-    global _deepseek_index
-    if not config.DEEPSEEK_KEYS:
+def get_next_openrouter_key() -> str:
+    """Returns the next OpenRouter API key in a round-robin fashion."""
+    global _openrouter_index
+    if not config.OPENROUTER_KEYS:
         return ""
-    key = config.DEEPSEEK_KEYS[_deepseek_index]
-    _deepseek_index = (_deepseek_index + 1) % len(config.DEEPSEEK_KEYS)
+    key = config.OPENROUTER_KEYS[_openrouter_index]
+    _openrouter_index = (_openrouter_index + 1) % len(config.OPENROUTER_KEYS)
     return key
 
 def get_next_gemini_key() -> str:
@@ -25,7 +25,7 @@ def get_next_gemini_key() -> str:
     return key
 
 # System prompt for DeepSeek
-DEEPSEEK_SYSTEM_PROMPT = (
+OPENROUTER_SYSTEM_PROMPT = (
     "شما یک دستیار هوشمند و همدل هستید که به کاربران فارسی‌زبان در مسیر ترک عادت‌های مخرب "
     "(به ویژه ترک خودارضایی) کمک می‌کنید. لحن شما باید بسیار دوستانه، درک‌کننده، و انگیزه بخش باشد. "
     "از قضاوت کردن بپرهیزید و به جای آن راهکارهای عملی و حمایت روانی ارائه دهید."
@@ -38,22 +38,22 @@ GEMINI_SYSTEM_PROMPT = (
     "لحن باید جذاب، تاثیرگذار و همدلانه باشد. غلط‌های املایی و نگارشی را اصلاح کنید."
 )
 
-async def ask_deepseek(user_message: str) -> str:
-    """Sends a user message to DeepSeek API and returns the empathetic response."""
-    key = get_next_deepseek_key()
+async def ask_openrouter(user_message: str) -> str:
+    """Sends a user message to OpenRouter API and returns the empathetic response."""
+    key = get_next_openrouter_key()
     if not key:
-        return "متاسفانه کلید API برای دیپ‌سیک تنظیم نشده است."
+        return "متاسفانه کلید API برای OpenRouter تنظیم نشده است."
 
     # We will use DeepSeek's OpenAI compatible API endpoint
-    url = "https://api.deepseek.com/chat/completions"
+    url = "https://openrouter.ai/api/v1/chat/completions"
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {key}"
     }
     payload = {
-        "model": config.DEEPSEEK_TEXT_MODEL,
+        "model": config.OPENROUTER_TEXT_MODEL,
         "messages": [
-            {"role": "system", "content": DEEPSEEK_SYSTEM_PROMPT},
+            {"role": "system", "content": OPENROUTER_SYSTEM_PROMPT},
             {"role": "user", "content": user_message}
         ]
     }
@@ -67,23 +67,23 @@ async def ask_deepseek(user_message: str) -> str:
                 else:
                     return f"خطا در ارتباط با سرور: {response.status}"
     except Exception as e:
-        return f"خطای سیستمی در ارتباط با دیپ‌سیک: {str(e)}"
+        return f"خطای سیستمی در ارتباط با OpenRouter: {str(e)}"
 
 async def generate_daily_motivation() -> str:
     """Generates a short, daily motivational message via DeepSeek."""
-    key = get_next_deepseek_key()
+    key = get_next_openrouter_key()
     if not key:
-        return "پیام انگیزشی به دلیل نبود کلید API دیپ‌سیک ایجاد نشد."
+        return "پیام انگیزشی به دلیل نبود کلید API OpenRouter ایجاد نشد."
 
-    url = "https://api.deepseek.com/chat/completions"
+    url = "https://openrouter.ai/api/v1/chat/completions"
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {key}"
     }
     payload = {
-        "model": config.DEEPSEEK_TEXT_MODEL,
+        "model": config.OPENROUTER_TEXT_MODEL,
         "messages": [
-            {"role": "system", "content": DEEPSEEK_SYSTEM_PROMPT},
+            {"role": "system", "content": OPENROUTER_SYSTEM_PROMPT},
             {"role": "user", "content": "لطفا یک پیام انگیزشی و روانشناختی کوتاه (حدود ۲-۳ پاراگراف) برای ادامه مسیر ترک عادت بنویس."}
         ]
     }
