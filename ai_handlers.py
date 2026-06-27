@@ -1,38 +1,37 @@
+
 import aiohttp
-import json
 import config
+import database
+import json
 
-
-# Global variables for Round-Robin state
+# Global variables for sequential state
 _openrouter_index = 0
 _gemini_index = 0
 
-def get_next_openrouter_key() -> str:
-    """Returns the next OpenRouter API key in a round-robin fashion."""
+def get_current_openrouter_key() -> str:
+    if not config.OPENROUTER_KEYS: return ""
+    return config.OPENROUTER_KEYS[_openrouter_index]
+
+def advance_openrouter_key():
     global _openrouter_index
-    if not config.OPENROUTER_KEYS:
-        return ""
-    key = config.OPENROUTER_KEYS[_openrouter_index]
-    _openrouter_index = (_openrouter_index + 1) % len(config.OPENROUTER_KEYS)
-    return key
+    if config.OPENROUTER_KEYS:
+        _openrouter_index = (_openrouter_index + 1) % len(config.OPENROUTER_KEYS)
 
-def get_next_gemini_key() -> str:
-    """Returns the next Gemini API key in a round-robin fashion."""
+def get_current_gemini_key() -> str:
+    if not config.GEMINI_KEYS: return ""
+    return config.GEMINI_KEYS[_gemini_index]
+
+def advance_gemini_key():
     global _gemini_index
-    if not config.GEMINI_KEYS:
-        return ""
-    key = config.GEMINI_KEYS[_gemini_index]
-    _gemini_index = (_gemini_index + 1) % len(config.GEMINI_KEYS)
-    return key
+    if config.GEMINI_KEYS:
+        _gemini_index = (_gemini_index + 1) % len(config.GEMINI_KEYS)
 
-# System prompt for DeepSeek
 OPENROUTER_SYSTEM_PROMPT = (
     "شما یک دستیار هوشمند و همدل هستید که به کاربران فارسی‌زبان در مسیر ترک عادت‌های مخرب "
     "(به ویژه ترک خودارضایی) کمک می‌کنید. لحن شما باید بسیار دوستانه، درک‌کننده، و انگیزه بخش باشد. "
     "از قضاوت کردن بپرهیزید و به جای آن راهکارهای عملی و حمایت روانی ارائه دهید."
 )
 
-# System prompt for Gemini (Admin Editor)
 GEMINI_SYSTEM_PROMPT = (
     "شما یک ویراستار حرفه‌ای محتوای فارسی هستید. متن ارسالی توسط ادمین را دریافت کرده و آن را "
     "برای انتشار در یک کانال تلگرامی که هدف آن حمایت از افراد در مسیر ترک عادات مخرب است، ویرایش و بهینه‌سازی کنید. "
@@ -40,17 +39,10 @@ GEMINI_SYSTEM_PROMPT = (
 )
 
 async def ask_openrouter(user_message: str) -> str:
-    """Sends a user message to OpenRouter API and returns the empathetic response."""
-    key = get_next_openrouter_key()
-    if not key:
+    if not config.OPENROUTER_KEYS:
         return "متاسفانه کلید API برای OpenRouter تنظیم نشده است."
 
-    # We will use DeepSeek's OpenAI compatible API endpoint
     url = "https://openrouter.ai/api/v1/chat/completions"
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {key}"
-    }
     payload = {
         "model": config.OPENROUTER_TEXT_MODEL,
         "messages": [
@@ -59,127 +51,112 @@ async def ask_openrouter(user_message: str) -> str:
         ]
     }
 
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, json=payload, timeout=20) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    return data["choices"][0]["message"]["content"]
-                else:
-                    return f"خطا در ارتباط با سرور: {response.status}"
-    except Exception as e:
-        return f"خطای سیستمی در ارتباط با OpenRouter: {str(e)}"
+    attempts = len(config.OPENROUTER_KEYS)
+    for _ in range(attempts):
+        key = get_current_openrouter_key()
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {key}"
+        }
 
-async def generate_daily_motivation() -> str:
-    """Generates a short, daily motivational message via DeepSeek."""
-    key = get_next_openrouter_key()
-    if not key:
-        return "پیام انگیزشی به دلیل نبود کلید API OpenRouter ایجاد نشد."
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, headers=headers, json=payload, timeout=20) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        return data["choices"][0]["message"]["content"]
+                    else:
+                        error_msg = f"OpenRouter status {response.status} with key index {_openrouter_index}"
+                        database.log_error(error_msg)
+                        advance_openrouter_key()
+        except Exception as e:
+            error_msg = f"OpenRouter connection exception: {str(e)}"
+            database.log_error(error_msg)
+            advance_openrouter_key()
 
-    url = "https://openrouter.ai/api/v1/chat/completions"
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {key}"
-    }
-    payload = {
-        "model": config.OPENROUTER_TEXT_MODEL,
-        "messages": [
-            {"role": "system", "content": OPENROUTER_SYSTEM_PROMPT},
-            {"role": "user", "content": "لطفا یک پیام انگیزشی و روانشناختی کوتاه (حدود ۲-۳ پاراگراف) برای ادامه مسیر ترک عادت بنویس."}
-        ]
-    }
+    return "خطا در ارتباط با سرور OpenRouter پس از امتحان کردن تمام کلیدها."
 
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, json=payload, timeout=20) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    return data["choices"][0]["message"]["content"]
-                else:
-                    return f"خطا در ایجاد پیام روزانه: {response.status}"
-    except Exception as e:
-        return f"خطای سیستمی در ایجاد پیام روزانه: {str(e)}"
 
 async def edit_with_gemini(text: str) -> str:
-    """Sends raw text to Gemini API for editing and optimization."""
-    key = get_next_gemini_key()
-    if not key:
+    if not config.GEMINI_KEYS:
         return "متاسفانه کلید API برای جمنای تنظیم نشده است."
 
-    # Using Gemini's REST API endpoint
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{config.GEMINI_TEXT_MODEL}:generateContent?key={key}"
-    headers = {
-        "Content-Type": "application/json"
-    }
+    url_base = f"https://generativelanguage.googleapis.com/v1beta/models/{config.GEMINI_TEXT_MODEL}:generateContent?key="
+    headers = {"Content-Type": "application/json"}
     payload = {
         "contents": [{
             "parts": [{"text": f"{GEMINI_SYSTEM_PROMPT}\n\nمتن اصلی:\n{text}"}]
         }]
     }
 
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, json=payload, timeout=20) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    try:
-                        return data["candidates"][0]["content"]["parts"][0]["text"]
-                    except (KeyError, IndexError):
-                        return "خطا در پردازش پاسخ جمنای."
-                else:
-                    return f"خطا در ارتباط با سرور جمنای: {response.status}"
-    except Exception as e:
-        return f"خطای سیستمی در ارتباط با جمنای: {str(e)}"
+    attempts = len(config.GEMINI_KEYS)
+    for _ in range(attempts):
+        key = get_current_gemini_key()
+        url = url_base + key
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, headers=headers, json=payload, timeout=20) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        try:
+                            return data["candidates"][0]["content"]["parts"][0]["text"]
+                        except (KeyError, IndexError):
+                            database.log_error("Gemini Edit Error: Invalid JSON response format.")
+                            advance_gemini_key()
+                    else:
+                        database.log_error(f"Gemini Edit status {response.status} with key index {_gemini_index}")
+                        advance_gemini_key()
+        except Exception as e:
+            database.log_error(f"Gemini Edit connection exception: {str(e)}")
+            advance_gemini_key()
+
+    return "خطا در ارتباط با سرور جمنای پس از امتحان کردن تمام کلیدها."
 
 
 async def generate_image_with_gemini(prompt: str) -> dict:
-    """Sends a prompt to Gemini API to generate an image and returns a dict with base64 data or error."""
-    key = get_next_gemini_key()
-    if not key:
+    if not config.GEMINI_KEYS:
         return {"error": "متاسفانه کلید API برای جمنای تنظیم نشده است."}
 
-    # Endpoint for Imagen models in AI Studio
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{config.GEMINI_IMAGE_MODEL}:predict?key={key}"
-    headers = {
-        "Content-Type": "application/json"
-    }
+    url_base = f"https://generativelanguage.googleapis.com/v1beta/models/{config.GEMINI_IMAGE_MODEL}:predict?key="
+    headers = {"Content-Type": "application/json"}
     payload = {
         "instances": [{"prompt": prompt}],
         "parameters": {"sampleCount": 1}
     }
 
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, json=payload, timeout=30) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    try:
-                        b64_img = data["predictions"][0]["bytesBase64Encoded"]
-                        return {"image_base64": b64_img}
-                    except (KeyError, IndexError):
-                        return {"error": "خطا در پردازش تصویر دریافتی از جمنای."}
-                else:
-                    return {"error": f"خطا در ارتباط با سرور جمنای (تصویر): {response.status}"}
-    except Exception as e:
-        return {"error": f"خطای سیستمی در تولید عکس: {str(e)}"}
+    attempts = len(config.GEMINI_KEYS)
+    for _ in range(attempts):
+        key = get_current_gemini_key()
+        url = url_base + key
 
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, headers=headers, json=payload, timeout=30) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        try:
+                            b64_img = data["predictions"][0]["bytesBase64Encoded"]
+                            return {"image_base64": b64_img}
+                        except (KeyError, IndexError):
+                            database.log_error("Gemini Image Error: Invalid JSON response format.")
+                            advance_gemini_key()
+                    else:
+                        database.log_error(f"Gemini Image status {response.status} with key index {_gemini_index}")
+                        advance_gemini_key()
+        except Exception as e:
+            database.log_error(f"Gemini Image connection exception: {str(e)}")
+            advance_gemini_key()
+
+    return {"error": "خطا در تولید عکس جمنای پس از امتحان کردن تمام کلیدها."}
 
 
 async def generate_channel_post(has_image: bool = False) -> dict:
-    """
-    Generates an engaging channel post using Gemini.
-    If has_image is True, it also requests an English prompt for an image, generates the image using Gemini Image Model,
-    and returns a dict with 'text' and 'image_base64'.
-    Otherwise, returns a dict with just 'text'.
-    """
-    key = get_next_gemini_key()
-    if not key:
+    if not config.GEMINI_KEYS:
         return {"error": "خطا: کلید API برای جمنای تنظیم نشده است."}
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{config.GEMINI_TEXT_MODEL}:generateContent?key={key}"
-    headers = {
-        "Content-Type": "application/json"
-    }
+    url_base = f"https://generativelanguage.googleapis.com/v1beta/models/{config.GEMINI_TEXT_MODEL}:generateContent?key="
+    headers = {"Content-Type": "application/json"}
 
     if has_image:
         prompt = (
@@ -206,37 +183,85 @@ async def generate_channel_post(has_image: bool = False) -> dict:
         }]
     }
 
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, json=payload, timeout=20) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    try:
-                        result_text = data["candidates"][0]["content"]["parts"][0]["text"]
+    attempts = len(config.GEMINI_KEYS)
+    for _ in range(attempts):
+        key = get_current_gemini_key()
+        url = url_base + key
 
-                        if has_image:
-                            # Parse JSON
-                            try:
-                                # Clean up markdown formatting if Gemini wrapped it in ```json
-                                result_text = result_text.replace("```json", "").replace("```", "").strip()
-                                parsed = json.loads(result_text)
-                                post_text = parsed.get("post_text", "خطا در استخراج متن.")
-                                img_prompt = parsed.get("image_prompt", "")
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, headers=headers, json=payload, timeout=20) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        try:
+                            result_text = data["candidates"][0]["content"]["parts"][0]["text"]
 
-                                img_data = await generate_image_with_gemini(img_prompt)
-                                if "error" in img_data:
-                                    return {"error": img_data["error"], "text": post_text}
+                            if has_image:
+                                try:
+                                    result_text = result_text.replace("```json", "").replace("```", "").strip()
+                                    parsed = json.loads(result_text)
+                                    post_text = parsed.get("post_text", "خطا در استخراج متن.")
+                                    img_prompt = parsed.get("image_prompt", "")
 
-                                return {"text": post_text, "image_base64": img_data["image_base64"]}
+                                    img_data = await generate_image_with_gemini(img_prompt)
+                                    if "error" in img_data:
+                                        return {"error": img_data["error"], "text": post_text}
 
-                            except json.JSONDecodeError:
-                                return {"error": "پاسخ جمنای فرمت JSON معتبری نداشت."}
-                        else:
-                            return {"text": result_text}
+                                    return {"text": post_text, "image_base64": img_data["image_base64"]}
 
-                    except (KeyError, IndexError):
-                        return {"error": "خطا در پردازش پاسخ جمنای برای پست کانال."}
-                else:
-                    return {"error": f"خطا در ارتباط با سرور جمنای (پست کانال): {response.status}"}
-    except Exception as e:
-        return {"error": f"خطای سیستمی در ارتباط با جمنای (پست کانال): {str(e)}"}
+                                except json.JSONDecodeError:
+                                    database.log_error("Gemini Post Error: Invalid JSON parsing.")
+                                    advance_gemini_key()
+                            else:
+                                return {"text": result_text}
+
+                        except (KeyError, IndexError):
+                            database.log_error("Gemini Post Error: Response missing candidates/content.")
+                            advance_gemini_key()
+                    else:
+                        database.log_error(f"Gemini Post status {response.status} with key index {_gemini_index}")
+                        advance_gemini_key()
+        except Exception as e:
+            database.log_error(f"Gemini Post connection exception: {str(e)}")
+            advance_gemini_key()
+
+    return {"error": "خطا در ایجاد پست جمنای پس از امتحان کردن تمام کلیدها."}
+
+
+async def generate_daily_motivation() -> str:
+    if not config.OPENROUTER_KEYS:
+        return "پیام انگیزشی به دلیل نبود کلید API ایجاد نشد."
+
+    url = "https://openrouter.ai/api/v1/chat/completions"
+    payload = {
+        "model": config.OPENROUTER_TEXT_MODEL,
+        "messages": [
+            {"role": "system", "content": OPENROUTER_SYSTEM_PROMPT},
+            {"role": "user", "content": "لطفا یک پیام انگیزشی و روانشناختی کوتاه (حدود ۲-۳ پاراگراف) برای ادامه مسیر ترک عادت بنویس."}
+        ]
+    }
+
+    attempts = len(config.OPENROUTER_KEYS)
+    for _ in range(attempts):
+        key = get_current_openrouter_key()
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {key}"
+        }
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, headers=headers, json=payload, timeout=20) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        return data["choices"][0]["message"]["content"]
+                    else:
+                        error_msg = f"OpenRouter Daily status {response.status} with key index {_openrouter_index}"
+                        database.log_error(error_msg)
+                        advance_openrouter_key()
+        except Exception as e:
+            error_msg = f"OpenRouter Daily connection exception: {str(e)}"
+            database.log_error(error_msg)
+            advance_openrouter_key()
+
+    return "خطا در ایجاد پیام روزانه پس از امتحان کردن تمام کلیدها."

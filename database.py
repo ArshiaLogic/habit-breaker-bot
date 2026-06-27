@@ -33,6 +33,14 @@ def init_db():
                 has_image INTEGER
             )
         ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS error_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT,
+                message TEXT
+            )
+        ''')
         conn.commit()
 
 def register_user(user_id: int):
@@ -162,3 +170,34 @@ def get_auto_posts_by_time(current_time: str) -> list:
         cursor = conn.cursor()
         cursor.execute('SELECT id, has_image FROM auto_posts WHERE post_time = ?', (current_time,))
         return cursor.fetchall()
+
+
+def log_error(message: str):
+    """Logs an error with the current timestamp."""
+    now_str = datetime.datetime.now().isoformat()
+    with sqlite3.connect(DB_FILE) as conn:
+        cursor = conn.cursor()
+        cursor.execute('INSERT INTO error_logs (timestamp, message) VALUES (?, ?)', (now_str, message))
+        conn.commit()
+
+def get_error_logs(limit: int = 10, offset: int = 0) -> list:
+    """Returns a list of error logs with pagination."""
+    with sqlite3.connect(DB_FILE) as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT id, timestamp, message FROM error_logs ORDER BY id DESC LIMIT ? OFFSET ?', (limit, offset))
+        return cursor.fetchall()
+
+def count_error_logs() -> int:
+    """Returns the total number of error logs."""
+    with sqlite3.connect(DB_FILE) as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT COUNT(*) FROM error_logs')
+        result = cursor.fetchone()
+        return result[0] if result else 0
+
+def clear_error_logs():
+    """Deletes all error logs."""
+    with sqlite3.connect(DB_FILE) as conn:
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM error_logs')
+        conn.commit()

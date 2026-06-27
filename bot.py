@@ -56,7 +56,8 @@ def get_admin_dashboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📝 ویراستاری و ارسال دستی", callback_data="admin_manual_post")],
         [InlineKeyboardButton(text="⚙️ تنظیمات محتوای خودکار", callback_data="admin_auto_post_settings")],
         [InlineKeyboardButton(text="📊 آمار دیتابیس", callback_data="admin_stats")],
-        [InlineKeyboardButton(text="📢 ارسال پیام همگانی (Broadcast)", callback_data="admin_broadcast")]
+        [InlineKeyboardButton(text="📢 ارسال پیام همگانی (Broadcast)", callback_data="admin_broadcast")],
+        [InlineKeyboardButton(text="📋 لاگ خطاها", callback_data="admin_logs_0")]
     ])
 
 def get_admin_auto_post_settings_keyboard() -> InlineKeyboardMarkup:
@@ -336,6 +337,50 @@ async def handle_admin_broadcast_input(message: Message, state: FSMContext):
     await loading_msg.edit_text(f"پیام همگانی با موفقیت به {sent_count} نفر ارسال شد. 🚀")
     await state.clear()
 
+
+
+@dp.callback_query(F.data.startswith("admin_logs_"))
+async def handle_admin_logs(callback: CallbackQuery):
+    if callback.from_user.id != config.ADMIN_ID:
+        return
+
+    page = int(callback.data.split("_")[-1])
+    limit = 10
+    offset = page * limit
+
+    logs = database.get_error_logs(limit=limit, offset=offset)
+    total_logs = database.count_error_logs()
+
+    if total_logs == 0:
+        await callback.message.edit_text("هیچ خطایی در دیتابیس ثبت نشده است. ✅", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 بازگشت", callback_data="admin_back")]]))
+        return
+
+    text = f"📋 لاگ خطاها (صفحه {page + 1})\nتعداد کل: {total_logs}\n\n"
+    for log in logs:
+        text += f"▪️ {log[1][:16]} | {log[2]}\n"
+
+    # Pagination buttons
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton(text="⬅️ قبلی", callback_data=f"admin_logs_{page-1}"))
+    if offset + limit < total_logs:
+        nav_buttons.append(InlineKeyboardButton(text="بعدی ➡️", callback_data=f"admin_logs_{page+1}"))
+
+    keyboard = []
+    if nav_buttons:
+        keyboard.append(nav_buttons)
+
+    keyboard.append([InlineKeyboardButton(text="🗑 پاک کردن لاگ‌ها", callback_data="admin_clear_logs")])
+    keyboard.append([InlineKeyboardButton(text="🔙 بازگشت", callback_data="admin_back")])
+
+    await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
+
+@dp.callback_query(F.data == "admin_clear_logs")
+async def handle_admin_clear_logs(callback: CallbackQuery):
+    if callback.from_user.id != config.ADMIN_ID:
+        return
+    database.clear_error_logs()
+    await callback.message.edit_text("تمام لاگ‌های خطا با موفقیت پاک شدند. 🗑", reply_markup=get_admin_dashboard())
 
 @dp.message(StateFilter(None), F.text)
 async def handle_user_message(message: Message):
